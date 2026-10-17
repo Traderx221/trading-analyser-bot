@@ -6,12 +6,12 @@ import pandas as pd
 import numpy as np
 import io
 import warnings
+import os
 
 warnings.filterwarnings('ignore')
 
-# Render par Environment Variable se token uthane ke liye
-import os
-BOT_TOKEN = os.getenv('BOT_TOKEN', '8851924440:AAHDMyHQ24L9LtV5Pz4HXzmfIABB9ueLDjQ')
+# Render ya environment se token uthane ke liye
+BOT_TOKEN = os.getenv('BOT_TOKEN', 'YOUR_API_TOKEN_HERE')
 bot = telebot.TeleBot(BOT_TOKEN)
 
 CATEGORIES = {
@@ -43,38 +43,38 @@ def get_category_markup(cat_id, page=0):
     start = page * items_per_page
     end = start + items_per_page
     current_stocks = stocks[start:end]
-    
+
     buttons = [InlineKeyboardButton(ticker, callback_data=f"st_{ticker}_{cat_id}") for ticker in current_stocks]
     markup.add(*buttons)
-    
+
     nav_buttons = []
     if page > 0:
         nav_buttons.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"pg_{cat_id}_{page-1}"))
     nav_buttons.append(InlineKeyboardButton("🏠 Menu", callback_data="main_menu"))
     if end < len(stocks):
         nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"pg_{cat_id}_{page+1}"))
-    
+
     markup.row(*nav_buttons)
     return markup
 
 def get_chart_controls_markup(ticker, cat_id, tf_code, ctype, indicator):
     markup = InlineKeyboardMarkup(row_width=3)
-    
+
     tfs = [("1min", "1 Min"), ("3min", "3 Min"), ("1D", "1 Day"), 
            ("1W", "1 Week"), ("1M", "1 Month"), ("1Y", "1 Year")]
     tf_buttons = [InlineKeyboardButton(f"✅ {label}" if code == tf_code else label, callback_data=f"ch_{ticker}_{cat_id}_{code}_{ctype}_{indicator}") for code, label in tfs]
     markup.add(*tf_buttons[:3])
     markup.add(*tf_buttons[3:])
-    
+
     types = [("candlestick", "🕯️ Candlestick"), ("line", "📈 Line"), ("bar", "📊 Bar")]
     type_buttons = [InlineKeyboardButton(f"✅ {label}" if t == ctype else label, callback_data=f"ch_{ticker}_{cat_id}_{tf_code}_{t}_{indicator}") for t, label in types]
     markup.add(*type_buttons)
-    
+
     inds = [("none", "🚫 No Ind."), ("sma", "📈 SMA 20"), ("ema", "📉 EMA 20"), ("bb", "📊 Bollinger"), ("rsi", "⚡ RSI 14")]
     ind_buttons = [InlineKeyboardButton(f"✅ {label}" if ind == indicator else label, callback_data=f"ch_{ticker}_{cat_id}_{tf_code}_{ctype}_{ind}") for ind, label in inds]
     markup.add(*ind_buttons[:3])
     markup.add(*ind_buttons[3:])
-    
+
     markup.add(InlineKeyboardButton(f"🔙 Back to {CATEGORIES[cat_id][0]}", callback_data=f"pg_{cat_id}_0"))
     return markup
 
@@ -108,17 +108,27 @@ def generate_professional_chart(ticker, tf_code, chart_type, indicator):
     else:
         period, interval = "1d", "5m"
 
-    data = yf.download(ticker, period=period, interval=interval, progress=False)
-    if data.empty:
+    try:
+        data = yf.download(ticker, period=period, interval=interval, progress=False)
+    except Exception:
+        return None, None, None, None
+
+    if data is None or data.empty:
         return None, None, None, None
 
     if isinstance(data.columns, pd.MultiIndex):
         data.columns = data.columns.droplevel(1)
 
     if tf_code == '3min':
-        data = data.resample('3T').agg({
-            'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'
-        }).dropna()
+        try:
+            data = data.resample('3T').agg({
+                'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'
+            }).dropna()
+        except Exception:
+            pass
+
+    if data.empty or 'Close' not in data.columns:
+        return None, None, None, None
 
     close = data['Close']
     curr_price = float(close.iloc[-1])
@@ -126,10 +136,10 @@ def generate_professional_chart(ticker, tf_code, chart_type, indicator):
     pct_change = ((curr_price - first_price) / first_price) * 100
 
     plt.style.use('dark_background')
-    
+
     has_rsi = (indicator == 'rsi')
     has_vol = ('Volume' in data.columns and data['Volume'].sum() > 0)
-    
+
     nrows = 1
     height_ratios = [4]
     if has_vol:
@@ -142,7 +152,7 @@ def generate_professional_chart(ticker, tf_code, chart_type, indicator):
     fig, axes = plt.subplots(nrows=nrows, ncols=1, figsize=(11, 7), sharex=True, gridspec_kw={'height_ratios': height_ratios})
     if nrows == 1:
         axes = [axes]
-    
+
     ax1 = axes[0]
     ax_idx = 1
 
@@ -150,11 +160,13 @@ def generate_professional_chart(ticker, tf_code, chart_type, indicator):
         up = data[data['Close'] >= data['Open']]
         down = data[data['Close'] < data['Open']]
         width = 0.0006 if tf_code in ['1min', '3min', '1D'] else (0.4 if tf_code in ['1W', '1M', '1Y'] else 0.003)
-        
-        ax1.vlines(up.index, up['Low'], up['High'], color='#26a69a', linewidth=1)
-        ax1.vlines(down.index, down['Low'], down['High'], color='#ef5350', linewidth=1)
-        ax1.bar(up.index, up['Close'] - up['Open'], bottom=up['Open'], color='#26a69a', width=width, alpha=0.9)
-        ax1.bar(down.index, down['Open'] - down['Close'], bottom=down['Close'], color='#ef5350', width=width, alpha=0.9)
+
+        if not up.empty:
+            ax1.vlines(up.index, up['Low'], up['High'], color='#26a69a', linewidth=1)
+            ax1.bar(up.index, up['Close'] - up['Open'], bottom=up['Open'], color='#26a69a', width=width, alpha=0.9)
+        if not down.empty:
+            ax1.vlines(down.index, down['Low'], down['High'], color='#ef5350', linewidth=1)
+            ax1.bar(down.index, down['Open'] - down['Close'], bottom=down['Close'], color='#ef5350', width=width, alpha=0.9)
     elif chart_type == "bar":
         width = 0.001 if tf_code in ['1min', '3min', '1D'] else 0.6
         ax1.bar(data.index, close, color='#26a69a' if pct_change >= 0 else '#ef5350', alpha=0.8, width=width)
@@ -204,7 +216,7 @@ def generate_professional_chart(ticker, tf_code, chart_type, indicator):
         loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
         rs = gain / loss
         rsi = 100 - (100 / (1 + rs))
-        
+
         ax_rsi.plot(data.index, rsi, color='#ab47bc', linewidth=1.5)
         ax_rsi.axhline(70, color='#ef5350', linestyle='--', alpha=0.5, linewidth=1)
         ax_rsi.axhline(30, color='#26a69a', linestyle='--', alpha=0.5, linewidth=1)
@@ -213,7 +225,6 @@ def generate_professional_chart(ticker, tf_code, chart_type, indicator):
         ax_rsi.set_ylabel("RSI (14)", color='lightgray', fontsize=9)
         ax_rsi.set_ylim(0, 100)
         ax_rsi.grid(True, linestyle=':', alpha=0.2, color='gray')
-        ind_label = "RSI 14"
 
     fig.autofmt_xdate()
     plt.tight_layout()
@@ -222,7 +233,7 @@ def generate_professional_chart(ticker, tf_code, chart_type, indicator):
     plt.savefig(buf, format='png', dpi=120, bbox_inches='tight', facecolor=fig.get_facecolor(), edgecolor='none')
     buf.seek(0)
     plt.close('all')
-    
+
     plt.style.use('default')
 
     change_text = f"🟩 +{pct_change:.2f}%" if pct_change > 0 else f"🟥 {pct_change:.2f}%"
@@ -237,7 +248,10 @@ def send_or_update_chart(chat_id, message_id, ticker, cat_id, tf_code, ctype, in
     if buf is None:
         error_msg = f"❌ Data not found for {ticker}."
         if is_update:
-            bot.edit_message_caption(caption=error_msg, chat_id=chat_id, message_id=message_id)
+            try:
+                bot.edit_message_caption(caption=error_msg, chat_id=chat_id, message_id=message_id)
+            except Exception:
+                bot.send_message(chat_id, error_msg)
         else:
             bot.edit_message_text(error_msg, chat_id=chat_id, message_id=processing_msg.message_id)
         return
@@ -246,8 +260,11 @@ def send_or_update_chart(chat_id, message_id, ticker, cat_id, tf_code, ctype, in
     markup = get_chart_controls_markup(ticker, cat_id, tf_code, ctype, indicator)
 
     if is_update:
-        media = InputMediaPhoto(buf, caption=caption, parse_mode="Markdown")
-        bot.edit_message_media(media=media, chat_id=chat_id, message_id=message_id, reply_markup=markup)
+        try:
+            media = InputMediaPhoto(buf, caption=caption, parse_mode="Markdown")
+            bot.edit_message_media(media=media, chat_id=chat_id, message_id=message_id, reply_markup=markup)
+        except Exception:
+            bot.send_photo(chat_id, photo=buf, caption=caption, reply_markup=markup, parse_mode="Markdown")
     else:
         bot.delete_message(chat_id=chat_id, message_id=processing_msg.message_id)
         bot.send_photo(chat_id, photo=buf, caption=caption, reply_markup=markup, parse_mode="Markdown")
@@ -284,14 +301,15 @@ def handle_query(call):
         elif data.startswith("ch_"):
             parts = data.split("_")
             ticker = parts[1]
-            cat_id = parts[2]
-            tf_code = parts[3]
-            ctype = parts[4]
+            cat_id, tf_code, ctype = parts[2], parts[3], parts[4]
             indicator = parts[5] if len(parts) > 5 else "none"
             bot.answer_callback_query(call.id, f"Updating chart...")
             send_or_update_chart(chat_id, msg_id, ticker, cat_id, tf_code, ctype, indicator, is_update=True)
     except Exception as e:
-        bot.answer_callback_query(call.id, "Please wait...")
+        try:
+            bot.answer_callback_query(call.id, "Please wait...")
+        except:
+            pass
 
 if __name__ == "__main__":
     print("Pro Trading Bot with Candlestick Charts is running...")
