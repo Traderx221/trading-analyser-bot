@@ -11,7 +11,7 @@ import os
 warnings.filterwarnings('ignore')
 
 # Render ya environment se token uthane ke liye
-BOT_TOKEN = os.getenv('BOT_TOKEN', 'YOUR_API_TOKEN_HERE')
+BOT_TOKEN = os.getenv('BOT_TOKEN', '8851924440:AAHDMyHQ24L9LtV5Pz4HXzmfIABB9ueLDjQ')
 bot = telebot.TeleBot(BOT_TOKEN)
 
 CATEGORIES = {
