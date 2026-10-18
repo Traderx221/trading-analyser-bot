@@ -93,28 +93,24 @@ def show_quick_quotes(message):
     bot.reply_to(message, "Menu se kisi bhi stock par click karke professional candlestick chart aur indicators dekhein.")
 
 def generate_professional_chart(ticker, tf_code, chart_type, indicator):
-    if tf_code == '1min':
-        period, interval = "1d", "1m"
-    elif tf_code == '3min':
-        period, interval = "1d", "1m"
-    elif tf_code == '1D':
-        period, interval = "1d", "5m"
-    elif tf_code == '1W':
-        period, interval = "5d", "15m"
-    elif tf_code == '1M':
-        period, interval = "1mo", "1d"
-    elif tf_code == '1Y':
-        period, interval = "1y", "1d"
-    else:
-        period, interval = "1d", "5m"
+    if tf_code == '1min': period, interval = "1d", "1m"
+    elif tf_code == '3min': period, interval = "1d", "1m"
+    elif tf_code == '1D': period, interval = "1d", "5m"
+    elif tf_code == '1W': period, interval = "5d", "15m"
+    elif tf_code == '1M': period, interval = "1mo", "1d"
+    elif tf_code == '1Y': period, interval = "1y", "1d"
+    else: period, interval = "1d", "5m"
 
     try:
         data = yf.download(ticker, period=period, interval=interval, progress=False)
-    except Exception:
-        return None, None, None, None
+    except Exception as e:
+        print(f"yfinance download error for {ticker}: {e}")
+        # FIXED: Return 5 None values
+        return None, None, None, None, None
 
     if data is None or data.empty:
-        return None, None, None, None
+        # FIXED: Return 5 None values
+        return None, None, None, None, None
 
     if isinstance(data.columns, pd.MultiIndex):
         data.columns = data.columns.droplevel(1)
@@ -128,7 +124,8 @@ def generate_professional_chart(ticker, tf_code, chart_type, indicator):
             pass
 
     if data.empty or 'Close' not in data.columns:
-        return None, None, None, None
+        # FIXED: Return 5 None values
+        return None, None, None, None, None
 
     close = data['Close']
     curr_price = float(close.iloc[-1])
@@ -169,7 +166,7 @@ def generate_professional_chart(ticker, tf_code, chart_type, indicator):
             ax1.bar(down.index, down['Open'] - down['Close'], bottom=down['Close'], color='#ef5350', width=width, alpha=0.9)
     elif chart_type == "bar":
         width = 0.001 if tf_code in ['1min', '3min', '1D'] else 0.6
-        ax1.bar(data.index, close, color='#26a69a' if pct_change >= 0 else '#ef5350', alpha=0.8, width=width)
+        ax1.bar(data.index, close, color=['#26a69a' if c >= o else '#ef5350' for c, o in zip(data['Close'], data['Open'])], alpha=0.8, width=width)
     else:
         ax1.plot(data.index, close, color='#29b6f6', linewidth=2, label="Close")
         ax1.fill_between(data.index, close, close.min(), color='#29b6f6', alpha=0.1)
@@ -246,71 +243,9 @@ def send_or_update_chart(chat_id, message_id, ticker, cat_id, tf_code, ctype, in
     buf, curr_price, change_text, period_str, ind_name = generate_professional_chart(ticker, tf_code, ctype, indicator)
 
     if buf is None:
-        error_msg = f"❌ Data not found for {ticker}."
+        error_msg = f"❌ Data not found for {ticker}. Market ho sakta hai close ho ya ticker invalid ho."
         if is_update:
             try:
                 bot.edit_message_caption(caption=error_msg, chat_id=chat_id, message_id=message_id)
             except Exception:
-                bot.send_message(chat_id, error_msg)
-        else:
-            bot.edit_message_text(error_msg, chat_id=chat_id, message_id=processing_msg.message_id)
-        return
-
-    caption = f"🟢 *{ticker}* ({period_str})\n🕯️ *Style:* {ctype.capitalize()} | *Ind:* {ind_name}\n💵 *Price:* `${curr_price:.2f}`\n📊 *Change:* {change_text}"
-    markup = get_chart_controls_markup(ticker, cat_id, tf_code, ctype, indicator)
-
-    if is_update:
-        try:
-            media = InputMediaPhoto(buf, caption=caption, parse_mode="Markdown")
-            bot.edit_message_media(media=media, chat_id=chat_id, message_id=message_id, reply_markup=markup)
-        except Exception:
-            bot.send_photo(chat_id, photo=buf, caption=caption, reply_markup=markup, parse_mode="Markdown")
-    else:
-        bot.delete_message(chat_id=chat_id, message_id=processing_msg.message_id)
-        bot.send_photo(chat_id, photo=buf, caption=caption, reply_markup=markup, parse_mode="Markdown")
-
-@bot.callback_query_handler(func=lambda call: True)
-def handle_query(call):
-    data = call.data
-    chat_id = call.message.chat.id
-    msg_id = call.message.message_id
-
-    try:
-        if data == "main_menu":
-            bot.edit_message_text("👇 *Main Menu:*\nEk category chunein:", chat_id=chat_id, message_id=msg_id, reply_markup=get_main_menu_markup(), parse_mode="Markdown")
-        elif data.startswith("cat_"):
-            cat_id = data.replace("cat_", "")
-            cat_name = CATEGORIES[cat_id][0]
-            bot.edit_message_text(f"👇 *{cat_name}*\nKisi stock par click karein:", chat_id=chat_id, message_id=msg_id, reply_markup=get_category_markup(cat_id, 0), parse_mode="Markdown")
-        elif data.startswith("pg_"):
-            parts = data.split("_")
-            cat_id = parts[1]
-            page = int(parts[2])
-            cat_name = CATEGORIES[cat_id][0]
-            if call.message.content_type == 'photo':
-                bot.delete_message(chat_id, msg_id)
-                bot.send_message(chat_id, f"👇 *{cat_name}*\nKisi stock par click karein:", reply_markup=get_category_markup(cat_id, page), parse_mode="Markdown")
-            else:
-                bot.edit_message_text(f"👇 *{cat_name}*\nKisi stock par click karein:", chat_id=chat_id, message_id=msg_id, reply_markup=get_category_markup(cat_id, page), parse_mode="Markdown")
-        elif data.startswith("st_"):
-            parts = data.split("_")
-            ticker = parts[1]
-            cat_id = parts[2]
-            bot.answer_callback_query(call.id, f"Loading {ticker}...")
-            send_or_update_chart(chat_id, msg_id, ticker, cat_id, tf_code="1D", ctype="candlestick", indicator="none", is_update=False)
-        elif data.startswith("ch_"):
-            parts = data.split("_")
-            ticker = parts[1]
-            cat_id, tf_code, ctype = parts[2], parts[3], parts[4]
-            indicator = parts[5] if len(parts) > 5 else "none"
-            bot.answer_callback_query(call.id, f"Updating chart...")
-            send_or_update_chart(chat_id, msg_id, ticker, cat_id, tf_code, ctype, indicator, is_update=True)
-    except Exception as e:
-        try:
-            bot.answer_callback_query(call.id, "Please wait...")
-        except:
-            pass
-
-if __name__ == "__main__":
-    print("Pro Trading Bot with Candlestick Charts is running...")
-    bot.polling()
+                bot.send_
