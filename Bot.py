@@ -1,5 +1,5 @@
 
-    import telebot
+import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, InputMediaPhoto
 import yfinance as yf
 import matplotlib.pyplot as plt
