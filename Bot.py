@@ -1,4 +1,5 @@
-import telebot
+
+    import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, InputMediaPhoto
 import yfinance as yf
 import matplotlib.pyplot as plt
@@ -248,4 +249,87 @@ def send_or_update_chart(chat_id, message_id, ticker, cat_id, tf_code, ctype, in
             try:
                 bot.edit_message_caption(caption=error_msg, chat_id=chat_id, message_id=message_id)
             except Exception:
-                bot.send_
+                bot.send_message(chat_id, error_msg)
+        else:
+            bot.edit_message_text(error_msg, chat_id=chat_id, message_id=processing_msg.message_id)
+        return
+
+    caption = f"🟢 *{ticker}* ({period_str})\n🕯️ *Style:* {ctype.capitalize()} | *Ind:* {ind_name}\n💵 *Price:* `${curr_price:.2f}`\n📊 *Change:* {change_text}"
+    markup = get_chart_controls_markup(ticker, cat_id, tf_code, ctype, indicator)
+
+    if is_update:
+        try:
+            # FIXED: pass getvalue() and safely catch specific 'not modified' errors
+            media = InputMediaPhoto(buf.getvalue(), caption=caption, parse_mode="Markdown")
+            bot.edit_message_media(media=media, chat_id=chat_id, message_id=message_id, reply_markup=markup)
+        except Exception as e:
+            if "is not modified" not in str(e).lower():
+                bot.send_photo(chat_id, photo=buf.getvalue(), caption=caption, reply_markup=markup, parse_mode="Markdown")
+    else:
+        bot.delete_message(chat_id=chat_id, message_id=processing_msg.message_id)
+        bot.send_photo(chat_id, photo=buf.getvalue(), caption=caption, reply_markup=markup, parse_mode="Markdown")
+
+@bot.callback_query_handler(func=lambda call: True)
+def handle_query(call):
+    data = call.data
+    chat_id = call.message.chat.id
+    msg_id = call.message.message_id
+
+    try:
+        if data == "main_menu":
+            bot.edit_message_text("👇 *Main Menu:*\nEk category chunein:", chat_id=chat_id, message_id=msg_id, reply_markup=get_main_menu_markup(), parse_mode="Markdown")
+        elif data.startswith("cat_"):
+            cat_id = data.replace("cat_", "")
+            cat_name = CATEGORIES[cat_id][0]
+            bot.edit_message_text(f"👇 *{cat_name}*\nKisi stock par click karein:", chat_id=chat_id, message_id=msg_id, reply_markup=get_category_markup(cat_id, 0), parse_mode="Markdown")
+        elif data.startswith("pg_"):
+            parts = data.split("_")
+            cat_id = parts[1]
+            page = int(parts[2])
+            cat_name = CATEGORIES[cat_id][0]
+            if call.message.content_type == 'photo':
+                bot.delete_message(chat_id, msg_id)
+                bot.send_message(chat_id, f"👇 *{cat_name}*\nKisi stock par click karein:", reply_markup=get_category_markup(cat_id, page), parse_mode="Markdown")
+            else:
+                bot.edit_message_text(f"👇 *{cat_name}*\nKisi stock par click karein:", chat_id=chat_id, message_id=msg_id, reply_markup=get_category_markup(cat_id, page), parse_mode="Markdown")
+        elif data.startswith("st_"):
+            parts = data.split("_")
+            ticker = parts[1]
+            cat_id = parts[2]
+            bot.answer_callback_query(call.id, f"Loading {ticker}...")
+            send_or_update_chart(chat_id, msg_id, ticker, cat_id, tf_code="1D", ctype="candlestick", indicator="none", is_update=False)
+        elif data.startswith("ch_"):
+            parts = data.split("_")
+            ticker = parts[1]
+            cat_id, tf_code, ctype = parts[2], parts[3], parts[4]
+            indicator = parts[5] if len(parts) > 5 else "none"
+            bot.answer_callback_query(call.id, f"Updating chart...")
+            send_or_update_chart(chat_id, msg_id, ticker, cat_id, tf_code, ctype, indicator, is_update=True)
+    except Exception as e:
+        print(f"Callback Error: {e}") # Log error for debugging
+        try:
+            bot.answer_callback_query(call.id, "Please wait...")
+        except:
+            pass
+
+if __name__ == "__main__":
+    print("Pro Trading Bot with Candlestick Charts is running...")
+    bot.polling()
+# --- Dummy Web Server for Render ---
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot is running perfectly!"
+
+def run_web_server():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
+
+if __name__ == "__main__":
+    # Web server ko alag thread mein start karein
+    threading.Thread(target=run_web_server).start()
+    
+    print("Pro Trading Bot is running...")
+    bot.polling(none_stop=True)
+
