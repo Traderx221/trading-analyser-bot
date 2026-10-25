@@ -13,11 +13,11 @@ from flask import Flask
 
 warnings.filterwarnings('ignore')
 
-# Render ya environment se token uthane ke liye
+# Get token from environment variables or use the provided one
 BOT_TOKEN = os.getenv('BOT_TOKEN', '8851924440:AAHDMyHQ24L9LtV5Pz4HXzmfIABB9ueLDjQ')
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# 💱 Forex aur baqi Categories
+# Categories including Forex
 CATEGORIES = {
     "forex": ("💱 Forex & Currencies", ["EURUSD=X", "USDJPY=X", "GBPUSD=X", "AUDUSD=X", "USDCAD=X", "USDCHF=X", "NZDUSD=X", "USDAED=X", "EURAED=X", "USDPKR=X", "USDINR=X", "DX-Y.NYB"]),
     "tech": ("📱 Tech & Telecom", ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA", "NFLX", "ADBE", "CRM", "AMD", "INTC", "CSCO", "ORCL", "QCOM", "IBM", "TXN", "AVGO", "SHOP", "SNOW", "UBER", "ABNB", "PYPL", "SQ", "ROKU", "ZM", "PLTR", "U", "DOCU", "NET"]),
@@ -86,12 +86,16 @@ def get_chart_controls_markup(ticker, cat_id, tf_code, ctype, indicator):
     markup.add(InlineKeyboardButton(f"🔙 Back to {CATEGORIES[cat_id][0]}", callback_data=f"pg_{cat_id}_0"))
     return markup
 
-# --- NAYA FUNCTION: Advanced Technical Analysis (Signal) ---
+# --- Advanced Technical Analysis (Signal) ---
 def get_advanced_signal(symbol):
     try:
         df = yf.download(symbol, period='1y', interval='1d', progress=False)
         if df.empty:
             return "⚠️ Symbol not found or data unavailable."
+
+        # Fix for MultiIndex Error
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.droplevel(1)
 
         df.ta.rsi(length=14, append=True)
         df.ta.macd(fast=12, slow=26, signal=9, append=True)
@@ -138,17 +142,17 @@ def get_advanced_signal(symbol):
 
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
-    welcome_text = "Welcome to *Professional Trading Bot* 📈\n\nAdvanced Candlestick charts & indicators are now active. Select from menu:"
+    welcome_text = "Welcome to *Professional Trading Bot* 📈\n\nAdvanced Candlestick charts & indicators are now active. Select from the menu:"
     bot.send_message(message.chat.id, welcome_text, reply_markup=get_permanent_keyboard(), parse_mode="Markdown")
-    bot.send_message(message.chat.id, "👇 *Main Menu:*\nEk category chunein:", reply_markup=get_main_menu_markup(), parse_mode="Markdown")
+    bot.send_message(message.chat.id, "👇 *Main Menu:*\nChoose a category:", reply_markup=get_main_menu_markup(), parse_mode="Markdown")
 
 @bot.message_handler(func=lambda message: message.text == "📋 Main Menu" or message.text == "/menu")
 def show_main_menu(message):
-    bot.send_message(message.chat.id, "👇 *Main Menu:*\nEk category chunein:", reply_markup=get_main_menu_markup(), parse_mode="Markdown")
+    bot.send_message(message.chat.id, "👇 *Main Menu:*\nChoose a category:", reply_markup=get_main_menu_markup(), parse_mode="Markdown")
 
 @bot.message_handler(func=lambda message: message.text == "📊 Fast Live Quotes")
 def show_quick_quotes(message):
-    bot.reply_to(message, "Menu se kisi bhi stock par click karke professional candlestick chart aur indicators dekhein.")
+    bot.reply_to(message, "Select any asset from the menu to view its professional candlestick chart and indicators.")
 
 def generate_professional_chart(ticker, tf_code, chart_type, indicator):
     if tf_code == '1min': period, interval = "1d", "1m"
@@ -300,7 +304,7 @@ def send_or_update_chart(chat_id, message_id, ticker, cat_id, tf_code, ctype, in
     buf, curr_price, change_text, period_str, ind_name = generate_professional_chart(ticker, tf_code, ctype, indicator)
 
     if buf is None:
-        error_msg = f"❌ Data not found for {display_ticker}. Market ho sakta hai close ho ya ticker invalid ho."
+        error_msg = f"❌ Data not found for {display_ticker}. The market might be closed or the ticker is invalid."
         if is_update:
             try:
                 bot.edit_message_caption(caption=error_msg, chat_id=chat_id, message_id=message_id)
@@ -332,12 +336,12 @@ def handle_query(call):
 
     try:
         if data == "main_menu":
-            bot.edit_message_text("👇 *Main Menu:*\nEk category chunein:", chat_id=chat_id, message_id=msg_id, reply_markup=get_main_menu_markup(), parse_mode="Markdown")
+            bot.edit_message_text("👇 *Main Menu:*\nChoose a category:", chat_id=chat_id, message_id=msg_id, reply_markup=get_main_menu_markup(), parse_mode="Markdown")
             
         elif data.startswith("cat_"):
             cat_id = data.replace("cat_", "")
             cat_name = CATEGORIES[cat_id][0]
-            bot.edit_message_text(f"👇 *{cat_name}*\nKisi stock par click karein:", chat_id=chat_id, message_id=msg_id, reply_markup=get_category_markup(cat_id, 0), parse_mode="Markdown")
+            bot.edit_message_text(f"👇 *{cat_name}*\nClick on an asset:", chat_id=chat_id, message_id=msg_id, reply_markup=get_category_markup(cat_id, 0), parse_mode="Markdown")
             
         elif data.startswith("pg_"):
             parts = data.split("_")
@@ -346,9 +350,9 @@ def handle_query(call):
             cat_name = CATEGORIES[cat_id][0]
             if call.message.content_type == 'photo':
                 bot.delete_message(chat_id, msg_id)
-                bot.send_message(chat_id, f"👇 *{cat_name}*\nKisi stock par click karein:", reply_markup=get_category_markup(cat_id, page), parse_mode="Markdown")
+                bot.send_message(chat_id, f"👇 *{cat_name}*\nClick on an asset:", reply_markup=get_category_markup(cat_id, page), parse_mode="Markdown")
             else:
-                bot.edit_message_text(f"👇 *{cat_name}*\nKisi stock par click karein:", chat_id=chat_id, message_id=msg_id, reply_markup=get_category_markup(cat_id, page), parse_mode="Markdown")
+                bot.edit_message_text(f"👇 *{cat_name}*\nClick on an asset:", chat_id=chat_id, message_id=msg_id, reply_markup=get_category_markup(cat_id, page), parse_mode="Markdown")
                 
         elif data.startswith("st_"):
             parts = data.split("_")
