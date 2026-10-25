@@ -97,6 +97,7 @@ def get_advanced_signal(symbol):
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
 
+        # Indicators calculate karein
         df.ta.rsi(length=14, append=True)
         df.ta.macd(fast=12, slow=26, signal=9, append=True)
         df.ta.sma(length=50, append=True)
@@ -109,14 +110,26 @@ def get_advanced_signal(symbol):
         except:
             latest_price = float(latest['Close'])
 
-        rsi = latest['RSI_14']
-        macd = latest['MACD_12_26_9']
-        macd_signal = latest['MACDs_12_26_9']
-        sma_50 = latest['SMA_50']
-        sma_200 = latest['SMA_200']
-        bb_lower = latest['BBL_20_2.0']
-        bb_upper = latest['BBU_20_2.0']
+        # 🟢 YAHAN FIX KIYA HAI: Dynamic Column Matching
+        # Yeh tareeqa chahe column ka naam kuch bhi ho (BBL_20_2.0 ya BBL_20_2), usay khud dhoond lega
+        bb_lower_col = next((col for col in df.columns if col.startswith('BBL_20')), None)
+        bb_upper_col = next((col for col in df.columns if col.startswith('BBU_20')), None)
+        rsi_col = next((col for col in df.columns if col.startswith('RSI_')), None)
+        macd_col = next((col for col in df.columns if col.startswith('MACD_')), None)
+        macds_col = next((col for col in df.columns if col.startswith('MACDs_')), None)
+        sma50_col = next((col for col in df.columns if col.startswith('SMA_50')), None)
+        sma200_col = next((col for col in df.columns if col.startswith('SMA_200')), None)
 
+        # Values extract karein (agar koi indicator fail ho jaye to 0 set kar de)
+        rsi = latest[rsi_col] if rsi_col else 50
+        macd = latest[macd_col] if macd_col else 0
+        macd_signal = latest[macds_col] if macds_col else 0
+        sma_50 = latest[sma50_col] if sma50_col else 0
+        sma_200 = latest[sma200_col] if sma200_col else 0
+        bb_lower = latest[bb_lower_col] if bb_lower_col else 0
+        bb_upper = latest[bb_upper_col] if bb_upper_col else 0
+
+        # Score calculation
         buy_score = sum([rsi < 30, macd > macd_signal, sma_50 > sma_200, latest_price < bb_lower])
         sell_score = sum([rsi > 70, macd < macd_signal, sma_50 < sma_200, latest_price > bb_upper])
         total_score = buy_score - sell_score
