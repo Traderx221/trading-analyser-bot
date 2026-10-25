@@ -1,4 +1,3 @@
- 
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, InputMediaPhoto
 import yfinance as yf
@@ -18,7 +17,7 @@ warnings.filterwarnings('ignore')
 BOT_TOKEN = os.getenv('BOT_TOKEN', '8851924440:AAHDMyHQ24L9LtV5Pz4HXzmfIABB9ueLDjQ')
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# 💱 Nayi Forex Category yahan add ki gayi hai
+# 💱 Forex aur baqi Categories
 CATEGORIES = {
     "forex": ("💱 Forex & Currencies", ["EURUSD=X", "USDJPY=X", "GBPUSD=X", "AUDUSD=X", "USDCAD=X", "USDCHF=X", "NZDUSD=X", "USDAED=X", "EURAED=X", "USDPKR=X", "USDINR=X", "DX-Y.NYB"]),
     "tech": ("📱 Tech & Telecom", ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA", "NFLX", "ADBE", "CRM", "AMD", "INTC", "CSCO", "ORCL", "QCOM", "IBM", "TXN", "AVGO", "SHOP", "SNOW", "UBER", "ABNB", "PYPL", "SQ", "ROKU", "ZM", "PLTR", "U", "DOCU", "NET"]),
