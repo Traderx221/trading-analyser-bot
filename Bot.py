@@ -1,13 +1,16 @@
-
+ 
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, InputMediaPhoto
 import yfinance as yf
 import matplotlib.pyplot as plt
 import pandas as pd
+import pandas_ta as ta
 import numpy as np
 import io
 import warnings
 import os
+import threading
+from flask import Flask
 
 warnings.filterwarnings('ignore')
 
@@ -15,7 +18,9 @@ warnings.filterwarnings('ignore')
 BOT_TOKEN = os.getenv('BOT_TOKEN', '8851924440:AAHDMyHQ24L9LtV5Pz4HXzmfIABB9ueLDjQ')
 bot = telebot.TeleBot(BOT_TOKEN)
 
+# 💱 Nayi Forex Category yahan add ki gayi hai
 CATEGORIES = {
+    "forex": ("💱 Forex & Currencies", ["EURUSD=X", "USDJPY=X", "GBPUSD=X", "AUDUSD=X", "USDCAD=X", "USDCHF=X", "NZDUSD=X", "USDAED=X", "EURAED=X", "USDPKR=X", "USDINR=X", "DX-Y.NYB"]),
     "tech": ("📱 Tech & Telecom", ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA", "NFLX", "ADBE", "CRM", "AMD", "INTC", "CSCO", "ORCL", "QCOM", "IBM", "TXN", "AVGO", "SHOP", "SNOW", "UBER", "ABNB", "PYPL", "SQ", "ROKU", "ZM", "PLTR", "U", "DOCU", "NET"]),
     "fin": ("🏦 Finance & Banking", ["JPM", "BAC", "WFC", "V", "MA", "GS", "MS", "AXP", "C", "BLK", "CB", "CME", "PGR", "USB", "PNC", "TFC", "COF", "SCHW", "SPGI", "MCO", "ICE"]),
     "health": ("🏥 Healthcare & Biotech", ["JNJ", "UNH", "PFE", "ABBV", "MRK", "TMO", "ABT", "DHR", "LLY", "BMY", "AMGN", "CVS", "GILD", "ISRG", "MDT", "ZTS", "REGN", "VRTX", "HUM", "CI"]),
@@ -45,7 +50,7 @@ def get_category_markup(cat_id, page=0):
     end = start + items_per_page
     current_stocks = stocks[start:end]
 
-    buttons = [InlineKeyboardButton(ticker, callback_data=f"st_{ticker}_{cat_id}") for ticker in current_stocks]
+    buttons = [InlineKeyboardButton(ticker.replace('=X', ''), callback_data=f"st_{ticker}_{cat_id}") for ticker in current_stocks]
     markup.add(*buttons)
 
     nav_buttons = []
@@ -75,9 +80,62 @@ def get_chart_controls_markup(ticker, cat_id, tf_code, ctype, indicator):
     ind_buttons = [InlineKeyboardButton(f"✅ {label}" if ind == indicator else label, callback_data=f"ch_{ticker}_{cat_id}_{tf_code}_{ctype}_{ind}") for ind, label in inds]
     markup.add(*ind_buttons[:3])
     markup.add(*ind_buttons[3:])
+    
+    # --- Deep Analysis Button ---
+    markup.add(InlineKeyboardButton("🤖 Get Deep Signal Analysis", callback_data=f"analyze_{ticker}"))
 
     markup.add(InlineKeyboardButton(f"🔙 Back to {CATEGORIES[cat_id][0]}", callback_data=f"pg_{cat_id}_0"))
     return markup
+
+# --- NAYA FUNCTION: Advanced Technical Analysis (Signal) ---
+def get_advanced_signal(symbol):
+    try:
+        df = yf.download(symbol, period='1y', interval='1d', progress=False)
+        if df.empty:
+            return "⚠️ Symbol not found or data unavailable."
+
+        df.ta.rsi(length=14, append=True)
+        df.ta.macd(fast=12, slow=26, signal=9, append=True)
+        df.ta.sma(length=50, append=True)
+        df.ta.sma(length=200, append=True)
+        df.ta.bbands(length=20, std=2, append=True)
+
+        latest = df.iloc[-1]
+        try:
+            latest_price = float(latest['Close'].iloc[0]) if isinstance(latest['Close'], pd.Series) else float(latest['Close'])
+        except:
+            latest_price = float(latest['Close'])
+
+        rsi = latest['RSI_14']
+        macd = latest['MACD_12_26_9']
+        macd_signal = latest['MACDs_12_26_9']
+        sma_50 = latest['SMA_50']
+        sma_200 = latest['SMA_200']
+        bb_lower = latest['BBL_20_2.0']
+        bb_upper = latest['BBU_20_2.0']
+
+        buy_score = sum([rsi < 30, macd > macd_signal, sma_50 > sma_200, latest_price < bb_lower])
+        sell_score = sum([rsi > 70, macd < macd_signal, sma_50 < sma_200, latest_price > bb_upper])
+        total_score = buy_score - sell_score
+        
+        if total_score >= 2: final_signal = "🟢 STRONG BUY"
+        elif total_score == 1: final_signal = "🟢 BUY"
+        elif total_score <= -2: final_signal = "🔴 STRONG SELL"
+        elif total_score == -1: final_signal = "🔴 SELL"
+        else: final_signal = "🟡 HOLD (Neutral)"
+
+        display_symbol = symbol.replace('=X', '')
+        result = f"📊 **{display_symbol.upper()} Advanced Analysis**\n"
+        result += f"💰 Current Price: ${latest_price:.4f}\n\n"
+        result += f"📈 **Indicators Breakdown:**\n"
+        result += f"🔹 **RSI (14):** {rsi:.2f} ({'Oversold' if rsi < 30 else 'Overbought' if rsi > 70 else 'Neutral'})\n"
+        result += f"🔹 **MACD:** {'Bullish 🟢' if macd > macd_signal else 'Bearish 🔴'}\n"
+        result += f"🔹 **Trend (SMA):** {'Uptrend 🟢' if sma_50 > sma_200 else 'Downtrend 🔴'}\n"
+        result += f"🔹 **Bollinger Bands:** {'Undervalued 🟢' if latest_price < bb_lower else 'Overvalued 🔴' if latest_price > bb_upper else 'Normal 🟡'}\n\n"
+        result += f"🤖 **FINAL SIGNAL:** {final_signal}"
+        return result
+    except Exception as e:
+        return f"Error in analysis: {e}"
 
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
@@ -106,11 +164,9 @@ def generate_professional_chart(ticker, tf_code, chart_type, indicator):
         data = yf.download(ticker, period=period, interval=interval, progress=False)
     except Exception as e:
         print(f"yfinance download error for {ticker}: {e}")
-        # FIXED: Return 5 None values
         return None, None, None, None, None
 
     if data is None or data.empty:
-        # FIXED: Return 5 None values
         return None, None, None, None, None
 
     if isinstance(data.columns, pd.MultiIndex):
@@ -125,7 +181,6 @@ def generate_professional_chart(ticker, tf_code, chart_type, indicator):
             pass
 
     if data.empty or 'Close' not in data.columns:
-        # FIXED: Return 5 None values
         return None, None, None, None, None
 
     close = data['Close']
@@ -195,7 +250,8 @@ def generate_professional_chart(ticker, tf_code, chart_type, indicator):
         ax1.legend(loc="upper left", fontsize=9, frameon=False)
         ind_label = "Bollinger Bands"
 
-    ax1.set_title(f"{ticker} | {tf_code.upper()} | {ind_label} | Price: ${curr_price:.2f} ({'+' if pct_change>0 else ''}{pct_change:.2f}%)", fontsize=12, fontweight='bold', color='white')
+    display_ticker = ticker.replace('=X', '')
+    ax1.set_title(f"{display_ticker} | {tf_code.upper()} | {ind_label} | Price: ${curr_price:.4f} ({'+' if pct_change>0 else ''}{pct_change:.2f}%)", fontsize=12, fontweight='bold', color='white')
     ax1.grid(True, linestyle=':', alpha=0.3, color='gray')
     ax1.set_ylabel("Price ($)", color='lightgray', fontsize=10)
 
@@ -238,13 +294,14 @@ def generate_professional_chart(ticker, tf_code, chart_type, indicator):
     return buf, curr_price, change_text, tf_code.upper(), ind_label
 
 def send_or_update_chart(chat_id, message_id, ticker, cat_id, tf_code, ctype, indicator, is_update=False):
+    display_ticker = ticker.replace('=X', '')
     if not is_update:
-        processing_msg = bot.send_message(chat_id, f"⌛ Generating professional trading chart for {ticker}...")
+        processing_msg = bot.send_message(chat_id, f"⌛ Generating professional trading chart for {display_ticker}...")
 
     buf, curr_price, change_text, period_str, ind_name = generate_professional_chart(ticker, tf_code, ctype, indicator)
 
     if buf is None:
-        error_msg = f"❌ Data not found for {ticker}. Market ho sakta hai close ho ya ticker invalid ho."
+        error_msg = f"❌ Data not found for {display_ticker}. Market ho sakta hai close ho ya ticker invalid ho."
         if is_update:
             try:
                 bot.edit_message_caption(caption=error_msg, chat_id=chat_id, message_id=message_id)
@@ -254,12 +311,11 @@ def send_or_update_chart(chat_id, message_id, ticker, cat_id, tf_code, ctype, in
             bot.edit_message_text(error_msg, chat_id=chat_id, message_id=processing_msg.message_id)
         return
 
-    caption = f"🟢 *{ticker}* ({period_str})\n🕯️ *Style:* {ctype.capitalize()} | *Ind:* {ind_name}\n💵 *Price:* `${curr_price:.2f}`\n📊 *Change:* {change_text}"
+    caption = f"🟢 *{display_ticker}* ({period_str})\n🕯️ *Style:* {ctype.capitalize()} | *Ind:* {ind_name}\n💵 *Price:* `${curr_price:.4f}`\n📊 *Change:* {change_text}"
     markup = get_chart_controls_markup(ticker, cat_id, tf_code, ctype, indicator)
 
     if is_update:
         try:
-            # FIXED: pass getvalue() and safely catch specific 'not modified' errors
             media = InputMediaPhoto(buf.getvalue(), caption=caption, parse_mode="Markdown")
             bot.edit_message_media(media=media, chat_id=chat_id, message_id=message_id, reply_markup=markup)
         except Exception as e:
@@ -278,10 +334,12 @@ def handle_query(call):
     try:
         if data == "main_menu":
             bot.edit_message_text("👇 *Main Menu:*\nEk category chunein:", chat_id=chat_id, message_id=msg_id, reply_markup=get_main_menu_markup(), parse_mode="Markdown")
+            
         elif data.startswith("cat_"):
             cat_id = data.replace("cat_", "")
             cat_name = CATEGORIES[cat_id][0]
             bot.edit_message_text(f"👇 *{cat_name}*\nKisi stock par click karein:", chat_id=chat_id, message_id=msg_id, reply_markup=get_category_markup(cat_id, 0), parse_mode="Markdown")
+            
         elif data.startswith("pg_"):
             parts = data.split("_")
             cat_id = parts[1]
@@ -292,12 +350,14 @@ def handle_query(call):
                 bot.send_message(chat_id, f"👇 *{cat_name}*\nKisi stock par click karein:", reply_markup=get_category_markup(cat_id, page), parse_mode="Markdown")
             else:
                 bot.edit_message_text(f"👇 *{cat_name}*\nKisi stock par click karein:", chat_id=chat_id, message_id=msg_id, reply_markup=get_category_markup(cat_id, page), parse_mode="Markdown")
+                
         elif data.startswith("st_"):
             parts = data.split("_")
             ticker = parts[1]
             cat_id = parts[2]
-            bot.answer_callback_query(call.id, f"Loading {ticker}...")
+            bot.answer_callback_query(call.id, f"Loading {ticker.replace('=X', '')}...")
             send_or_update_chart(chat_id, msg_id, ticker, cat_id, tf_code="1D", ctype="candlestick", indicator="none", is_update=False)
+            
         elif data.startswith("ch_"):
             parts = data.split("_")
             ticker = parts[1]
@@ -305,17 +365,24 @@ def handle_query(call):
             indicator = parts[5] if len(parts) > 5 else "none"
             bot.answer_callback_query(call.id, f"Updating chart...")
             send_or_update_chart(chat_id, msg_id, ticker, cat_id, tf_code, ctype, indicator, is_update=True)
+            
+        # --- Deep Analysis Button Handler ---
+        elif data.startswith("analyze_"):
+            ticker = data.split("_")[1]
+            display_ticker = ticker.replace('=X', '')
+            bot.answer_callback_query(call.id, f"Analyzing {display_ticker}...")
+            bot.send_message(chat_id, f"⏳ Generating deep technical analysis for {display_ticker}...")
+            signal_result = get_advanced_signal(ticker)
+            bot.send_message(chat_id, signal_result, parse_mode="Markdown")
+
     except Exception as e:
-        print(f"Callback Error: {e}") # Log error for debugging
+        print(f"Callback Error: {e}")
         try:
             bot.answer_callback_query(call.id, "Please wait...")
         except:
             pass
 
-if __name__ == "__main__":
-    print("Pro Trading Bot with Candlestick Charts is running...")
-    bot.polling()
-# --- Dummy Web Server for Render ---
+# --- Web Server for Render ---
 app = Flask(__name__)
 
 @app.route('/')
@@ -327,9 +394,6 @@ def run_web_server():
     app.run(host="0.0.0.0", port=port)
 
 if __name__ == "__main__":
-    # Web server ko alag thread mein start karein
     threading.Thread(target=run_web_server).start()
-    
-    print("Pro Trading Bot is running...")
+    print("Pro Trading Bot with Forex is running...")
     bot.polling(none_stop=True)
-
