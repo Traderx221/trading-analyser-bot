@@ -3,3 +3,5 @@ yfinance
 matplotlib
 pandas
 numpy
+pandas_ta
+Flask
