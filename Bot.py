@@ -3,7 +3,6 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 import yfinance as yf
 import matplotlib.pyplot as plt
 import pandas as pd
-import pandas_ta as ta
 import numpy as np
 import io
 import warnings
@@ -13,11 +12,9 @@ from flask import Flask
 
 warnings.filterwarnings('ignore')
 
-# Get token from environment variables or use the provided one
 BOT_TOKEN = os.getenv('BOT_TOKEN', '8851924440:AAHDMyHQ24L9LtV5Pz4HXzmfIABB9ueLDjQ')
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# Categories including Forex
 CATEGORIES = {
     "forex": ("💱 Forex & Currencies", ["EURUSD=X", "USDJPY=X", "GBPUSD=X", "AUDUSD=X", "USDCAD=X", "USDCHF=X", "NZDUSD=X", "USDAED=X", "EURAED=X", "USDPKR=X", "USDINR=X", "DX-Y.NYB"]),
     "tech": ("📱 Tech & Telecom", ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA", "NFLX", "ADBE", "CRM", "AMD", "INTC", "CSCO", "ORCL", "QCOM", "IBM", "TXN", "AVGO", "SHOP", "SNOW", "UBER", "ABNB", "PYPL", "SQ", "ROKU", "ZM", "PLTR", "U", "DOCU", "NET"]),
@@ -80,58 +77,47 @@ def get_chart_controls_markup(ticker, cat_id, tf_code, ctype, indicator):
     markup.add(*ind_buttons[:3])
     markup.add(*ind_buttons[3:])
     
-    # --- Deep Analysis Button ---
     markup.add(InlineKeyboardButton("🤖 Get Deep Signal Analysis", callback_data=f"analyze_{ticker}"))
-
     markup.add(InlineKeyboardButton(f"🔙 Back to {CATEGORIES[cat_id][0]}", callback_data=f"pg_{cat_id}_0"))
     return markup
 
-# --- Advanced Technical Analysis (Signal) ---
 def get_advanced_signal(symbol):
     try:
         df = yf.download(symbol, period='1y', interval='1d', progress=False)
         if df.empty:
             return "⚠️ Symbol not found or data unavailable."
 
-        # Fix for MultiIndex Error
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
 
-        # Indicators calculate karein
-        df.ta.rsi(length=14, append=True)
-        df.ta.macd(fast=12, slow=26, signal=9, append=True)
-        df.ta.sma(length=50, append=True)
-        df.ta.sma(length=200, append=True)
-        df.ta.bbands(length=20, std=2, append=True)
+        close = df['Close']
+        
+        delta = close.diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / loss
+        rsi = 100 - (100 / (1 + rs)).iloc[-1]
 
-        latest = df.iloc[-1]
-        try:
-            latest_price = float(latest['Close'].iloc[0]) if isinstance(latest['Close'], pd.Series) else float(latest['Close'])
-        except:
-            latest_price = float(latest['Close'])
+        sma_50 = close.rolling(window=50).mean().iloc[-1]
+        sma_200 = close.rolling(window=200).mean().iloc[-1]
 
-        # 🟢 YAHAN FIX KIYA HAI: Dynamic Column Matching
-        # Yeh tareeqa chahe column ka naam kuch bhi ho (BBL_20_2.0 ya BBL_20_2), usay khud dhoond lega
-        bb_lower_col = next((col for col in df.columns if col.startswith('BBL_20')), None)
-        bb_upper_col = next((col for col in df.columns if col.startswith('BBU_20')), None)
-        rsi_col = next((col for col in df.columns if col.startswith('RSI_')), None)
-        macd_col = next((col for col in df.columns if col.startswith('MACD_')), None)
-        macds_col = next((col for col in df.columns if col.startswith('MACDs_')), None)
-        sma50_col = next((col for col in df.columns if col.startswith('SMA_50')), None)
-        sma200_col = next((col for col in df.columns if col.startswith('SMA_200')), None)
+        sma20 = close.rolling(window=20).mean()
+        std20 = close.rolling(window=20).std()
+        bb_upper = (sma20 + (std20 * 2)).iloc[-1]
+        bb_lower = (sma20 - (std20 * 2)).iloc[-1]
 
-        # Values extract karein (agar koi indicator fail ho jaye to 0 set kar de)
-        rsi = latest[rsi_col] if rsi_col else 50
-        macd = latest[macd_col] if macd_col else 0
-        macd_signal = latest[macds_col] if macds_col else 0
-        sma_50 = latest[sma50_col] if sma50_col else 0
-        sma_200 = latest[sma200_col] if sma200_col else 0
-        bb_lower = latest[bb_lower_col] if bb_lower_col else 0
-        bb_upper = latest[bb_upper_col] if bb_upper_col else 0
+        exp1 = close.ewm(span=12, adjust=False).mean()
+        exp2 = close.ewm(span=26, adjust=False).mean()
+        macd_line = exp1 - exp2
+        macd_signal = macd_line.ewm(span=9, adjust=False).mean()
+        
+        macd = macd_line.iloc[-1]
+        macds = macd_signal.iloc[-1]
 
-        # Score calculation
-        buy_score = sum([rsi < 30, macd > macd_signal, sma_50 > sma_200, latest_price < bb_lower])
-        sell_score = sum([rsi > 70, macd < macd_signal, sma_50 < sma_200, latest_price > bb_upper])
+        latest_price = float(close.iloc[-1])
+
+        buy_score = sum([rsi < 30, macd > macds, sma_50 > sma_200, latest_price < bb_lower])
+        sell_score = sum([rsi > 70, macd < macds, sma_50 < sma_200, latest_price > bb_upper])
         total_score = buy_score - sell_score
         
         if total_score >= 2: final_signal = "🟢 STRONG BUY"
@@ -145,7 +131,7 @@ def get_advanced_signal(symbol):
         result += f"💰 Current Price: ${latest_price:.4f}\n\n"
         result += f"📈 **Indicators Breakdown:**\n"
         result += f"🔹 **RSI (14):** {rsi:.2f} ({'Oversold' if rsi < 30 else 'Overbought' if rsi > 70 else 'Neutral'})\n"
-        result += f"🔹 **MACD:** {'Bullish 🟢' if macd > macd_signal else 'Bearish 🔴'}\n"
+        result += f"🔹 **MACD:** {'Bullish 🟢' if macd > macds else 'Bearish 🔴'}\n"
         result += f"🔹 **Trend (SMA):** {'Uptrend 🟢' if sma_50 > sma_200 else 'Downtrend 🔴'}\n"
         result += f"🔹 **Bollinger Bands:** {'Undervalued 🟢' if latest_price < bb_lower else 'Overvalued 🔴' if latest_price > bb_upper else 'Normal 🟡'}\n\n"
         result += f"🤖 **FINAL SIGNAL:** {final_signal}"
@@ -382,7 +368,6 @@ def handle_query(call):
             bot.answer_callback_query(call.id, f"Updating chart...")
             send_or_update_chart(chat_id, msg_id, ticker, cat_id, tf_code, ctype, indicator, is_update=True)
             
-        # --- Deep Analysis Button Handler ---
         elif data.startswith("analyze_"):
             ticker = data.split("_")[1]
             display_ticker = ticker.replace('=X', '')
@@ -398,18 +383,17 @@ def handle_query(call):
         except:
             pass
 
-# --- Web Server for Render ---
 app = Flask(__name__)
 
 @app.route('/')
 def home():
     return "Bot is running perfectly!"
 
-def run_web_server():
+def function_web_server():
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
 
 if __name__ == "__main__":
-    threading.Thread(target=run_web_server).start()
+    threading.Thread(target=function_web_server).start()
     print("Pro Trading Bot with Forex is running...")
     bot.polling(none_stop=True)
