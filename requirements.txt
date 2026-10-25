@@ -2,6 +2,6 @@ pyTelegramBotAPI
 yfinance
 matplotlib
 pandas
+pandas-ta
 numpy
-pandas_ta
 Flask
